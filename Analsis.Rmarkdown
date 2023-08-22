@@ -1,0 +1,748 @@
+---
+title: "Analysis"
+author: "C.Stewart"
+date: "2023-07-04"
+output: word_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+SET UP
+```{r}
+require(dplyr) 
+require(tidyverse) 
+require(glmmTMB) 
+require(ggpubr)
+require(MASS)
+require(ggplot2)
+require(lme4)
+require(bbmle)
+require(DHARMa)
+library(installr)
+library(car)
+library(pracma)
+library(MuMIn)
+require(ggeffects)
+require(performance)
+library(see)
+library(corrgram)
+library(lattice)  
+library(ggmap)
+library(maptools)
+library(sp)
+library(rgdal)
+library(piecewiseSEM)
+
+rm(list=ls())
+
+#set working directory
+setwd("C:/Users/chars/OneDrive/Documents/CGS Project/Data")
+
+#import csv file
+df <- read.csv("summary.group.composition.csv")
+
+summary(df)
+```
+
+Descriptive statistics
+```{r}
+#total followed
+#mean
+mean(df$total_followed) #0.2595156
+
+sum(df$total_movement)
+
+#SE
+print(sd(df$total_followed)/sqrt(length((df$total_followed)))) # 0.02790386
+
+#SD
+sd(df$total_followed) # 0.8216253
+
+```
+
+GLM: zero inflated poisson model
+
+LEADER models:
+#LEADER GLOBAL model
+
+Fixed effects: Age, sex, group size, total adults, total juveniles, total adult females 
+
+Random effects (repeat measures) – tag and colony
+Offset for movement
+
+```{r}
+M_Global<- glmmTMB(total_followed~ sex+ age+ Group_Size+ age*sex+ Total_Adults+ Total_Juveniles + 
+                   offset(log(total_movement))+
+                   (1|Colony)+(1|Tag),
+                   data=df,
+                   ziformula=~1,
+                   family=poisson)
+summary(M_Global)
+```
+
+sex significant
+age not quite significant (0.1 level)
+
+
+#Validation (LEADER)
+
+model diagnostics
+
+```{r}
+Res <- simulateResiduals(M2b, n = 1000, plot = TRUE)# look for good qqplots
+# no significant problems detected, QQplot looks okay
+
+histM2b<-hist(residuals(M2b))#should be gaussian
+#Looks okay, normal distribution with slight positive skew
+ggsave("histM2b.pdf")
+
+ziM2b<-testZeroInflation(M2b, plot = TRUE)
+#looks okay - normal distribution but red line isn't quite central
+ggsave("ziM2b.png")
+
+testM2b<-testResiduals(M2b)
+#not sure how to interpret, but no red warnings
+ggsave("testM2b.png")
+
+check_overdispersion(M2b)
+# no overdispersion detected
+
+plot(residuals(M2b), type="b") # pattern? 
+
+plot(ggpredict(M2b))
+
+acf(residuals(M2b)) 
+#not sure on interpretation, but ACF is much higher when lag is at zero
+
+
+```
+
+check for colinearity of covariates:
+
+```{r}
+CorrData <- df[, c(8,9,10,11,12,13,14,15)]#extracts fixed factors  of interest to a dataframe 
+cor(CorrData)
+
+corrgram(CorrData, order=TRUE, lower.panel=panel.ellipse,
+         upper.panel=panel.pts, text.panel=panel.txt,
+         diag.panel=panel.minmax,
+         main="Model variables")
+
+```
+Total adults is correlated with total adult males, total adult females and group size
+Total females is correlated with total adults and group size
+Total males is correlated with total adults and group size
+Total subadults correlated with group size
+
+
+#Model Tests (LEADER) 
+
+```{r}
+
+rand(M_Global)# random effects
+#Error in rand(M_Global) : is.numeric(n) is not TRUE
+
+anova(M_Global)
+#Error in anova.glmmTMB(M_Global) :no single-model anova() method for glmmTMB
+
+AIC(M_Global)
+
+r.squaredGLMM(M_Global)# look at how much of variance is explained by the model
+#not sure on interpretation 
+
+```
+
+without sex:age
+```{r}
+Mb_Global<- glmmTMB(total_followed~ sex+ age+ Group_Size+ Total_Adults+ Total_Juveniles+ offset(log(total_movement))+(1|Colony)+(1|Tag),
+                   data=df,
+                   ziformula=~1,
+                   family=poisson)
+summary(Mb_Global)
+```
+just sex significant
+
+```{r}
+AICtab(M_Global,Mb_Global) # M_Global model better - with sex:age interaction 
+```
+
+start to remove fixed effects from the global model:
+
+#LEADER Model without group composition
+(remove effects of juveniles, adults and females)
+
+```{r}
+M1a<-glmmTMB(total_followed~ sex+ age+ age*sex+ Group_Size+ offset(log(total_movement))+(1|Colony) + (1|Tag),
+             data=df,
+             ziformula=~1,
+             family=poisson)
+summary(M1a)
+```
+
+check the effect of removing sex:age interaction
+```{r}
+#without sex:age interaction
+M1b<-glmmTMB(total_followed~ sex+ age+ Group_Size+ offset(log(total_movement))+(1|Colony) + (1|Tag),data=df,
+             ziformula=~1,
+             family=poisson)
+summary(M1b)
+
+AICtab(M1a,M1b) # model with interaction term is better
+```
+
+compare all models so far:
+```{r}
+AICtab(M_Global,Mb_Global,M1a, M1b)
+```
+M1a is better that M_Global - effects of juveniles and adults does not add to the model
+
+
+#BEST LEADER model (without group size)
+Remove group size but include adults and juveniles from group composition
+
+```{r}
+
+df$sex<- as.factor(df$sex)
+df$age<- as.integer(df$age)
+
+M2a<- glmmTMB(total_followed~ age + sex + sex*age+  Total_Adults + Total_Juveniles +offset(log(total_movement))+(1|Colony) + (1|Tag),
+              data=df,
+              ziformula=~1,
+              family=poisson)
+summary(M2a)
+#sex significant
+
+check_overdispersion(M2a) # none detected
+
+
+#just effect of adults
+M2b<- glmmTMB(total_followed~ age + sex + sex*age+  Total_Adults +offset(log(total_movement))+(1|Colony) + (1|Tag),
+              data=df,
+              ziformula=~1,
+              family=poisson)
+summary(M2b)
+
+#check R2, accounting for zero inflated model
+r2_zeroinflated(M2b, method = c ("default", "correlation"))
+
+
+M2bz<- glmmTMB(total_followed~ age + sex + sex*age+  Total_Adults +offset(log(total_movement))+(1|Colony) + (1|Tag),
+              data=df,
+              family=poisson)
+summary(M2bz)
+
+AICtab(M2b,M2bz)
+#M2b better - with zi formula
+
+#just juveniles
+M2c<- glmmTMB(total_followed~ age + sex + sex*age+ Total_Juveniles +offset(log(total_movement))+(1|Colony) + (1|Tag),
+              data=df,
+              family=poisson)
+summary(M2c)
+
+Res <- simulateResiduals(M2c, n = 1000, plot = TRUE)
+
+testZeroInflation(M2c, plot = TRUE)
+testResiduals(M2c)
+
+
+#without any group composition
+M2d<- glmmTMB(total_followed~ age + sex + sex*age +offset(log(total_movement))+(1|Colony) + (1|Tag),
+              data=df,
+              ziformula=~1,
+              family=poisson)
+summary(M2d)
+
+AICtab(M2a,M2b,M2c,M2d)
+
+# M2b best
+# with ~ziformula is better
+# with adults as a fixed effect, not juveniles
+
+
+```
+
+2a is the best model so far, and none of the fixed factors are colinear!
+
+```{r}
+M2e<- glmmTMB(total_followed~ age + sex +Total_Adults + Total_Juveniles + offset(log(total_movement))+(1|Colony) + (1|Tag),
+              data=df,
+              ziformula=~1,
+              family=poisson)
+summary(M2e)
+#sex significant
+
+AICtab(M2b, M2e)
+#M2a better - with interaction
+```
+
+> Models are always better with the sex:age interaction
+
+Compare all current models
+```{r}
+AICtab(M_Global,Mb_Global,M1a, M1b, M2a, M2b)
+
+```
+
+
+Model 2a is the best so far (without group size but with effects of juveniles and adults)
+ - seems like group size was not explaining much data
+
+Try M2a but with an offset for females?
+```{r}
+M4a<- glmmTMB(total_followed~ age + sex + sex*age+ Total_Adults + Total_Juveniles + offset(Total_Adult_Females)
+              + offset(log(total_movement))+(1|Colony) + (1|Tag),
+              data=df,
+              ziformula=~1,
+              family=poisson)
+summary(M4a)
+
+AICtab(M3a,M2a) #M2a better
+
+#try without offset for movement and females
+M4b<- glmmTMB(total_followed~ age + sex + sex*age+ Total_Adults + Total_Juveniles +(1|Colony) + (1|Tag),
+              data=df,
+              ziformula=~1,
+              family=poisson)
+summary(M4b)
+
+AICtab(M4a,M2a) #M2a better
+```
+
+
+
+#Compare LEADER models
+```{r}
+AICtab(M_Global,M2a,M1a,M3a,M4a)
+```
+
+M2a best
+M3a much worse than all the others - offset for adult females does not help explain the data more
+all models without sex:age interaction are poorer
+
+equations?
+
+pseudo R sq
+
+
+# interpret interaction term
+```{r}
+
+#set working directory
+setwd("C:/Users/chars/OneDrive/Documents/CGS Project/Data")
+
+#import csv file
+df <- read.csv("summary.group.composition.interaction.csv")
+
+#plot model results
+library('ggplot2')
+require(sjPlot)
+library('ggpubr')
+
+df$age_category <- factor(df$age, levels = c(1, 2, 3),
+                          labels = c("Juvenile", "Subadult", "Adult"))
+
+# Plotting using plot_model() with modified x-axis labels
+PlotA <- plot_model(
+  M2b,
+  type = "pred",
+  terms = c("age", "sex"),
+  axis.title = c("Age", " "), show.legend = TRUE, title = NULL)
+
+
+# Manually modify the x-axis labels
+LeaderPlot3<-PlotA + scale_x_continuous(breaks = c(1, 2, 3), labels = c("Juvenile", "Subadult", "Adult")) + Miya_theme
+
+PlotA
+
+#original plot (worng x axis)
+#PlotA <- plot_model(M2b, type = "pred", terms = c("age","sex"),
+#                    axis.title = c("Age", "Total followed"), title = "Effect of sex:age interaction on Total followed")
+
+```
+
+
+
+#FOLLOWER models
+
+Global follower:
+```{r}
+M_Global_follower<- glmmTMB(total_follower~ sex+ age+ Group_Size+ age*sex+ Total_Adults+ Total_Juveniles + 
+                   offset(log(total_movement))+
+                   (1|Colony)+(1|Tag),
+                   data=df,
+                   ziformula=~1,
+                   family=poisson)
+summary(M_Global_follower)
+```
+
+Sex, age and sex:age are significant and group size is nearly significant (0.1 level)
+
+# Validation (FOLLOWER)
+
+model diagnostics
+
+```{r}
+Res <- simulateResiduals(M_Global_follower, n = 1000, plot = TRUE)# look for good qqplots
+# no significant problems detected, QQplot looks okay
+
+hist(residuals(M_Global_follower))#should be gaussian
+# not really a normal distribution, positive skew
+
+testZeroInflation(M_Global_follower, plot = TRUE)
+#looks good - normal distribution 
+
+testResiduals(M_Global_follower)
+#not sure how to interpret, but no red warnings - one outlier
+
+check_overdispersion(M_Global_follower)
+# no over dispersion detected
+
+plot(residuals(M_Global_follower), type="b") # unsure of interpretation 
+
+ggpredict(M_Global_follower) # not sure on interpretation ...
+# males = 0.19, females = 0.07, males are 2.5 times more likely to follow than females
+
+acf(residuals(M_Global_follower)) 
+#not sure on interpretation, but ACF is much higher when lag is at zero
+
+#plot results
+par(mfrow=c(2,2)) 
+plot(ggpredict(M_Global_follower))
+# need to try and interpret
+
+plot(M_Global_follower)# fitted against residuals, look for a nice cloud
+#does not work, error: does not have components 'x' and 'y'
+
+vif(M_Global_follower) #variance inflation factor
+#Error in cov2cor(v) : 'V' is not a square numeric matrix
+
+```
+
+
+
+# Model Tests (FOLLOWER)
+
+```{r}
+
+rand(M_Global_follower)# random effects
+#Error in rand(M_Global) : is.numeric(n) is not TRUE
+
+anova(M_Global_follower)
+#Error in anova.glmmTMB(M_Global) :no single-model anova() method for glmmTMB
+
+AIC(M_Global_follower)
+
+r.squaredGLMM(M_Global_follower)# look at how much of variance is explained by the model
+#not sure on interpretation 
+
+```
+
+
+#FOLLOWER Global model without sex:age interaction
+```{r}
+Mb_Global_follower<- glmmTMB(total_follower~ sex+ age+ Group_Size+ Total_Adults+ Total_Juveniles+ offset(log(total_movement))+(1|Colony)+(1|Tag),
+                   data=df,
+                   ziformula=~1,
+                   family=poisson)
+summary(Mb_Global_follower)
+#just sex significant
+#age and group size become less significant
+
+#comparison:
+
+AICtab(M_Global_follower,Mb_Global_follower) # better with sex:age interaction 
+```
+
+
+
+start to remove fixed effects from the global FOLLOWER model:
+
+#BEST FOLOWER Model (JUST group size) 
+(remove effects of juveniles, adults)
+
+```{r}
+df$sex<- as.factor(df$sex)
+df$age<- as.integer(df$age)
+
+M1a_follower<-glmmTMB(total_follower~ sex+ age+ age*sex+ Group_Size+ offset(log(total_movement))+(1|Colony) + (1|Tag),
+             data=df,
+             ziformula=~1,
+             family=poisson)
+summary(M1a_follower)
+
+
+M1az_follower<-glmmTMB(total_follower~ age+ sex + age*sex+ Group_Size+ offset(log(total_movement))+(1|Colony) + (1|Tag),
+             data=df,
+             family=poisson)
+summary(M1az_follower)
+
+r2(M1az_follower, method = c ("default", "correlation"))
+
+
+M1b_follower<-glmmTMB(total_follower~ age+ sex + age*sex+ offset(log(total_movement))+(1|Colony) + (1|Tag),
+             data=df, ziformula=~1,
+             family=poisson)
+summary(M1b_follower)
+```
+
+
+# interpret follower interaction term
+```{r}
+#plot model results
+library('ggplot2')
+require(sjPlot)
+library('ggpubr')
+
+
+PlotB <- plot_model(
+  M1az_follower,
+  type = "pred",
+  terms = c("age", "sex"),
+  axis.title = c("Age", "Total follower occurences"),
+  title = "Effect of sex:age interaction on Total follower"
+)
+
+# Manually modify the x-axis labels
+PlotB + scale_x_continuous(breaks = c(1, 2, 3), labels = c("Juvenile", "Subadult", "Adult")) + Miya_theme
+
+PlotB
+```
+
+#Validation of follower model
+```{r}
+AICtab(M1a_follower,M1az_follower)
+#M1az is better - with ziformula
+
+Res <- simulateResiduals(M1az_follower, n = 1000, plot = TRUE)# look for good qqplots
+# no significant problems detected, QQplot looks okay
+
+hist(residuals(M1az_follower))#should be gaussian
+# not really a normal distribution, positive skew
+
+testZeroInflation(M1az_follower, plot = TRUE)
+#looks good - normal distribution 
+
+testResiduals(M1az_follower)
+# deviation significant KS test, p < 0.05
+testResiduals(M1az_follower) #better WITHOUT ~ziformula
+# deviation not significant KS test, p > 0.05
+
+check_overdispersion(M1a_follower)
+# no over dispersion detected
+
+plot(residuals(M1a_follower), type="b") # unsure of interpretation 
+
+ggpredict(M1a_follower) # not sure on interpretation ...
+
+acf(residuals(M1a_follower)) 
+#not sure on interpretation, but ACF is much higher when lag is at zero
+
+#plot results
+par(mfrow=c(2,2)) 
+plot(ggpredict(M1a_follower))
+# need to try and interpret
+
+```
+
+
+```{r}
+#check the effect of removing sex:age interaction
+#without sex:age interaction
+M1b_follower<-glmmTMB(total_follower~ sex+ age+ Group_Size+ offset(log(total_movement))+(1|Colony) + (1|Tag),data=df,
+             ziformula=~1,
+             family=poisson)
+summary(M1b_follower)
+
+AICtab(M1a_follower,M1b_follower) # model with interaction term is better
+
+#compare all follower models so far:
+AICtab(M_Global_follower,Mb_Global_follower,M1a_follower, M1b_follower)
+```
+M1a_follower is better that M_Global - effects of juveniles and adults does not add to the model
+
+> Models are always better with the sex:age interaction
+
+
+Model 1a is the best so far (with group size but without effects of juveniles and adults)
+ - seems like group size was not explaining much data
+
+Try M1a but with an offset for females?
+
+```{r}
+M1c_follower<- glmmTMB(total_follower~ age + sex + sex*age+ Group_Size + 
+              offset(Total_Adult_Females) + offset(log(total_movement))+(1|Colony) + (1|Tag),
+              data=df,
+              ziformula=~1,
+              family=poisson)
+summary(M1c_follower)
+```
+offset for females does not improve model
+M1a best model
+
+```{r}
+M2a_follower<-glmmTMB(total_follower~ sex+ age+ age*sex+ Total_Adults+ Total_Juveniles + offset(log(total_movement))+(1|Colony) + (1|Tag),
+             data=df,
+             ziformula=~1,
+             family=poisson)
+summary(M2a_follower)
+
+#just adults
+M2b_follower<-glmmTMB(total_follower~ sex+ age+ age*sex+ Total_Adults+ offset(log(total_movement))+(1|Colony) + (1|Tag),data=df,
+             ziformula=~1,
+             family=poisson)
+summary(M2b_follower)
+
+#just juveniles
+M2c_follower<-glmmTMB(total_follower~ sex+ age+ age*sex+ Total_Juveniles+ offset(log(total_movement))+(1|Colony) + (1|Tag),data=df,
+             ziformula=~1,
+             family=poisson)
+summary(M2c_follower)
+
+
+AICtab(M2a_follower,M2b_follower, M2c_follower) # model with interaction term is better
+```
+
+```{r}
+#group size and adults
+M3a_follower<-glmmTMB(total_follower~ sex+ age+ age*sex+ Group_Size + Total_Adults+ offset(log(total_movement))+(1|Colony) + (1|Tag),data=df,
+             ziformula=~1,
+             family=poisson)
+summary(M3a_follower)
+
+#group size and juveniles
+M3b_follower<-glmmTMB(total_follower~ sex+ age+ age*sex+ Group_Size+ Total_Juveniles+ offset(log(total_movement))+(1|Colony) + (1|Tag),data=df,
+             ziformula=~1,
+             family=poisson)
+summary(M3b_follower)
+
+M3bz_follower<-glmmTMB(total_follower~ sex+ age+ age*sex+ Group_Size+ Total_Juveniles+ offset(log(total_movement))+(1|Colony) + (1|Tag),data=df,
+             family=poisson)
+summary(M3bz_follower)
+
+AICtab(M3b_follower,M3bz_follower)
+```
+
+#LEADERS or not?
+
+A simple table by colony that shows, the number of unique individual tags that were followed by colony would quickly show whether colonies had one followed individual
+filter by total_followed > 2., and then arrange by colony and date, and then look at unique tags.
+
+```{r}
+#filter for any individuals that were followed once or more
+
+df <- df %>%
+  group_by(Colony) %>%
+  mutate(TagsPerColony = n_distinct(Tag))
+
+df2 <- df %>%
+   filter(total_followed >0)%>%
+  group_by(Colony, Date,total_followed,Group_Size,TagsPerColony) %>%
+  reframe(unique(Tag))
+
+#df2$Date <- as.Date(df2$Date)
+# when I filter for greater than zero, there are only 134 observations?!
+# greater than 2 has only 19
+
+df2 <- df2 %>%
+  rename(Tag = `unique(Tag)`)
+
+df2 <- df2 %>%
+  rename(TagsPerColonyPerDay = `Group_Size`)
+```
+
+Total Leaders Per Colony
+```{r}
+#create a column with number of leaders per colony
+PerColony <- df2 %>%
+  group_by(Colony) %>%
+  mutate(LeadersPerColony = n_distinct(Tag))
+
+PerColony <- PerColony %>% 
+  mutate(ProportionOfLeadersPerColony = LeadersPerColony / TagsPerColony)
+
+
+PerColony <- PerColony %>%
+  distinct(Colony, .keep_all = TRUE)
+
+#only 18 colonies?
+
+#add a column for the expected values - what you would expect if there was one leader per colony
+PerColony$ExpectedProportion <- 1 / PerColony$TagsPerColony
+
+#only in colony 4B dp we see the observed = the expected, In all other cases, observed > expected, so we can conclude there is no leadership
+# expected is atleast half the observed proportion 
+
+plot(PerColony$ProportionOfLeadersPerColony~PerColony$ExpectedProportion)
+#would expect a general trend with a slope of 1
+
+write.csv(PerColony, "C:/Users/chars/OneDrive/Documents/CGS Project/Data/LeadersPerColony.csv")
+
+
+```
+
+leaders per colony per day
+```{r}
+# Group the dataframe by 'Date' and 'Colony' and summarize the total leaders per colony per day
+PerColonyPerDay <- df2 %>%
+  group_by(Date, Colony,TagsPerColonyPerDay,Tag) %>%
+  reframe(LeadersPerColonyPerDay = n_distinct(Tag))
+
+# Merge the summarized data with the original dataframe based on the 'Date' and 'Colony' columns
+#df5 <- left_join(df3, df4, by = c("Date", "Colony"))
+
+#
+PerColonyPerDay <- PerColonyPerDay %>% 
+  mutate(ProportionOfLeadersPerColonyPerDay = LeadersPerColonyPerDay / TagsPerColonyPerDay)
+#134
+
+PerColonyPerDay<-PerColonyPerDay[,-4]
+
+PerColonyPerDay <- PerColonyPerDay %>%
+  distinct(Colony, Date, .keep_all = TRUE)
+
+#72
+```
+
+
+
+
+
+Chi square test
+
+Q1: are there leaders?
+
+Null hypothesis: There is no significant difference between the observed and the expected value.
+Alternative hypothesis: There is a significant difference between the observed and the expected value.
+```{r}
+#Question: Are the leaders the same number per colony, of a probability of 1 for each of the 18 colonies?
+
+# average df6$ProportionOfLeadersPerColonyPerDay
+average <- mean(df6$ProportionOfLeadersPerColonyPerDay)
+# average = 0.4620276
+# expected = 1 if leadership, close to zero if equally distributed
+
+# need to create same data frame with followers, proportion of followers per colony and average
+# then Chisq can be carried out with p = ? (if leadership is predicted)
+
+leader <- PerColony$LeadersPerColony
+res <- chisq.test(leader , p = c(1/18, 1/18,1/18,1/18,1/18,1/18,1/18,1/18,1/18,1/18,
+                                 1/18,1/18,1/18,1/18,1/18,1/18,1/18,1/18))
+res
+
+#Chi-squared test for given probabilities
+#data:  leader
+#X-squared = 15.478, df = 17, p-value = 0.5611
+
+```
+
+categories are leader and follower?
+
+need expected values of both and 
+
+
+
+
+
