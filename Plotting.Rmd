@@ -1,0 +1,284 @@
+---
+title: "Plotting Models"
+author: "C.Stewart"
+date: "2023-07-13"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+•	do put all the model diagnostics for all the models that you present in your report in a supplementary material document.
+•	make plots visualizing the relationships (e.g. plots of followed individuals that show proportion that are adult female, adult male, subadult, etc...)
+•	You may also consider a plot that shows the proportion of individuals that were followed that were of the logical categories (adult male, adult female, subadult....etc...), and a similar plot for those that were following.
+
+
+#LEADER plots
+```{r}
+rm(list=ls())
+
+Miya_theme<-theme(axis.text = element_text(size=10, color="black"),
+                  axis.title=element_text(size=10, color="black"),
+                  axis.line = element_line(color="black"),
+                  axis.ticks = element_line(color="black"),
+                  legend.position = "top",
+                  panel.background = element_rect(fill = "white", colour = "white",size = 1),
+                  panel.grid = element_blank(),
+                  panel.border = element_rect(colour = "black", fill=NA, size=1),
+                  plot.background = element_rect(fill = "white", colour = "white",size = 1))
+
+#set working directory
+setwd("C:/Users/chars/OneDrive/Documents/CGS Project/Data")
+
+#import csv file
+df <- read.csv("summary.group.composition.plotting.csv")
+
+#convert sex and age to characters
+df$sex<- as.character(df$sex)
+df$age<- as.character(df$age)
+
+# Create an ordered factor variable for 'age'
+df$age_category <- factor(df$age, levels = c(1, 2, 3),labels = c("Juvenile", "Subadult", "Adult"))
+
+df$sex <- factor(df$sex, levels = c(1, 2), labels = c("Male", "Female"))
+
+
+summary(df)
+
+library(tidyverse)
+```
+
+
+# Exploratory plots (descriptive): LEADER
+```{r}
+
+# followship as a function of age (violin plot)
+ggplot(data = df, aes(x = age_category, y = total_followed)) + geom_violin()
+
+# followship as a function of sex (violin plot)
+ggplot(data = df, aes(x = sex, y = total_followed)) + geom_violin()
+
+# followship as a function of number of total adults
+ggplot(data = df, aes(x = Total_Adults, y = total_followed)) + geom_point()
+
+# there are some foraging groups where total adults = 0, 
+# should these be discounted?
+
+ggplot(data = df, aes(x = Total_Adults, y = total_followed, colour = sex)) +
+  geom_count()
+
+
+
+```
+
+# Explore relationship between total followed and total adults
+```{r}
+
+# creating a df without the 0,0 values
+# so we can examine the relationship without the zero adult points
+df2 <- df[df$Total_Adults != 0, ]
+
+LeaderPlot1<-ggplot(data = df2, aes(x = Total_Adults, y = total_followed)) +
+ geom_point() + stat_smooth(se = FALSE, colour = "black", method = "lm") + Miya_theme + labs(
+ x = "Number of adults per group",y="")
+
+ggplot(data = df, aes(x = Total_Adults, y = total_followed)) +
+ geom_count() + stat_smooth(se = FALSE, colour = "black", method = "lm") + Miya_theme + labs(
+ x = "Number of adults per group", 
+ y = "Number of leader occurences")
+```
+
+
+Create a plot with larger dots for higher density of points - hasn't worked
+```{r}
+
+df$coordinates <- paste(df$total_followed, df$Total_Adults, sep = ",")
+
+df$frequency <- ave(df$coordinates, df$coordinates, FUN = length)
+
+ggplot(data = df, aes(x = Total_Adults, y = total_followed)) +
+ geom_count() + stat_smooth(method = "lm")
+#tried to create plot with LM line of best fit
+```
+
+
+# Facet plots
+```{r}
+
+ggplot(data = df, aes(x = Total_Adults, y = total_followed, colour = sex)) +
+ geom_point() +
+ facet_wrap(~ age_category)
+#uses age as facet, but age should not be categorical?
+
+#plot total_followed~ age and sex only 
+ggplot(data = df, aes(x = age, y = total_followed, colour = sex)) +
+ geom_violin() 
+
+
+LeaderPlot2<-ggplot(df, aes(x = age_category, y = total_followed, fill = sex)) +
+  geom_violin() +
+  labs(x = "Age", y="",fill = "Sex") +
+  scale_fill_manual(values = c("Male" = "blue", "Female" = "red")) +Miya_theme
+LeaderPlot2
+```
+
+
+# More complex stuff
+```{r}
+
+plot_model(M2b)
+
+plot_model(M2b, type = "pred", terms = c("age","sex","Total_Adults"), 
+           show.values = TRUE) +
+  facet_grid(. ~ group)
+
+#works but some funny output
+
+plot_model(M2b, type = "pred", terms = c("age", "sex", "Total_Adults"),
+           show.values = TRUE) +
+  facet_wrap(sex ~ sex)
+
+library(ggplot2)
+
+# Obtain predicted values from the model
+df$predicted <- predict(M2b, re.form = ~0)
+
+# Create the facet plot
+ggplot(df, aes(x = age, y = predicted)) +
+  geom_point() +
+  geom_line() +
+  facet_grid(sex ~ .) +
+  labs(x = "Age", y = "Predicted Values")
+#kind of interesting plot ?
+```
+
+#FACET code from Miya
+```{r}
+
+library('ggplot2')
+require(sjPlot)
+library('ggpubr')
+#create predicted plots
+
+################################
+# want four plots (facet grid) separated by sex (male, female) and age (adult, subadult)
+
+#plot raw variables
+
+#set variables for plots
+df$sex <-as.factor(df$sex)
+
+#plot raw values
+FollowedPlot  <- ggplot(data = df, aes(x = Total_Adults, y = total_followed, colour=sex)) +
+  geom_point() +
+  stat_smooth(method = "lm")+
+  facet_grid(sex ~ age)+
+  #labs(x="Age", y="Total followed")+
+  #scale_fill_grey()+
+  #scale_x_continuous(breaks = seq(0, 1, by = 1))+
+  Miya_theme +
+  theme(legend.position = c(0.2, 0.93),legend.direction = "horizontal", legend.key.size = unit(1, 'cm'),
+        legend.title = element_text(size=14), legend.text = element_text(size=14))
+FollowedPlot 
+
+#can we combine with predicted values plots?
+FollowedPlotPredicted <- plot_model(M2b, type = "pred", terms = c("age","sex"),
+                    axis.title = c("age", "Total followed"), title = " ") 
+FollowedPlotPredicted
+
+```
+
+#FINAL leader plot
+```{r}
+library(egg)
+library(cowplot)
+
+# Combine plots using cowplot's plot_grid function
+combined_plot <- plot_grid(LeaderPlot1,LeaderPlot2 ,ncol = 1,align = "v", axis = "lr",rel_heights = c(1,1))
+
+
+y_axis_label <- ggdraw() +
+  draw_label("Number of leader occurences", angle = 90, size = 10) +
+  theme_void()
+
+final_plot <- plot_grid(
+  y_axis_label,
+  combined_plot,
+  ncol = 2,
+  rel_widths = c(0.1, 0.9)
+)
+
+
+# Display the combined plot
+print(final_plot)
+
+```
+
+
+#FOLLOWER plots
+```{r}
+# follower as a function of age (violin plot)
+ggplot(data = df, aes(x = age, y = total_follower)) + geom_violin()
+
+# follower as a function of sex (violin plot)
+ggplot(data = df, aes(x = sex, y = total_follower)) + geom_violin()
+
+# follower as a function of number of total adults
+ggplot(data = df, aes(x = Total_Adults, y = total_follower)) + geom_point()
+
+# there are some foraging groups where total adults = 0, 
+# should these be discounted?
+
+ggplot(data = df, aes(x = age, y = total_follower, colour = sex)) +
+ geom_violin() 
+
+ggplot(df, aes(x = age_category, y = total_follower, fill = sex)) +
+  geom_violin() +
+  labs(x = "Age", y = "Total Follower", fill = "Sex") +
+  scale_fill_manual(values = c("Male" = "blue", "Female" = "pink")) + Miya_theme
+  
+
+ggplot(data = df, aes(x = total_followed, y = Total_Adults, colour = sex)) +
+  geom_point()
+#
+```
+
+```{r}
+ggplot(data = df, aes(x = Group_Size, y = total_follower)) +
+ geom_point()
+```
+
+```{r}
+FollowerPlot  <- ggplot(data = df, aes(x = Group_Size, y = total_followed, colour=sex)) +
+  geom_point() +
+  stat_smooth(method = "lm")+
+  facet_grid(sex ~ age)+
+  #labs(x="Age", y="Total followed")+
+  #scale_fill_grey()+
+  #scale_x_continuous(breaks = seq(0, 1, by = 1))+
+  Miya_theme +
+  theme(legend.position = c(0.2, 0.93),legend.direction = "horizontal", legend.key.size = unit(1, 'cm'),
+        legend.title = element_text(size=14), legend.text = element_text(size=14))
+FollowerPlot 
+```
+
+
+
+
+```{r}
+plot(ggpredict(M2ab))
+Plot <- ggarrange (M2ab$age, M2ab$sex, ncol=2, nrow=1, common.legend = TRUE, legend = "bottom")
+view(Plot)
+
+# make one plot through using a facet command as a layer to your ggplots
+
+ + facet_wrap(~ grouping variable)
+
+ 
+# facet_grid(groupvariable1 ~ groupvariable1)£ which would be sex¬satiation level in the Zuur data.
+
+
+```
+
